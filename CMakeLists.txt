@@ -23,8 +23,9 @@ endif()
 
 
 # setup tensorRT flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wno-write-strings")	# -std=gnu++11
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wno-write-strings -Wno-deprecated-declarations")	# -std=c++14 
 set(BUILD_DEPS "YES" CACHE BOOL "If YES, will install dependencies into sandbox.  Automatically reset to NO after dependencies are installed.")
+set(BUILD_INTERACTIVE "YES" CACHE BOOL "If NO, will download/install the default DNN models without prompting the user, and skip installation of PyTorch.")
 
 
 # copy configuration tools to build dir
@@ -37,8 +38,9 @@ file(COPY "tools/install-pytorch.rc" DESTINATION ${PROJECT_BINARY_DIR})
 # if this is the first time running cmake, perform pre-build dependency install script (or if the user manually triggers re-building the dependencies)
 if( ${BUILD_DEPS} )
 	message("-- Launching pre-build dependency installer script...")
+	message("-- Build interactive:  ${BUILD_INTERACTIVE}")
 
-	execute_process(COMMAND sh ../CMakePreBuild.sh
+	execute_process(COMMAND sh ../CMakePreBuild.sh ${BUILD_INTERACTIVE}
 				WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 				RESULT_VARIABLE PREBUILD_SCRIPT_RESULT)
 
@@ -71,7 +73,21 @@ if(CUDA_VERSION_MAJOR GREATER 9)
 
 	# OpenCV used for findHomography() and decomposeHomography()
 	# OpenCV version >= 3.0.0 required for decomposeHomography()
-	find_package(OpenCV 3.0.0 COMPONENTS core calib3d REQUIRED)
+	find_package(OpenCV COMPONENTS core calib3d)
+
+	if( NOT OpenCV_FOUND )
+		message("-- didn't find OpenCV on system, disabling OpenCV")
+	else()
+		message("-- OpenCV version:  " ${OpenCV_VERSION})
+
+		if( ${OpenCV_VERSION_MAJOR} LESS 3 )
+			message("-- OpenCV version less than 3.0, disabling OpenCV")
+		else()
+			message("-- OpenCV version >= 3.0.0, enabling OpenCV")
+			set(HAS_OPENCV 1)
+			add_definitions(-DHAS_OPENCV)
+		endif()	
+	endif()
 endif()
 
 # setup project output paths
@@ -136,7 +152,12 @@ add_subdirectory(python)
 target_link_libraries(jetson-inference jetson-utils nvinfer nvinfer_plugin nvcaffe_parser)
 
 if(CUDA_VERSION_MAJOR GREATER 9)
-	target_link_libraries(jetson-inference nvonnxparser opencv_core opencv_calib3d)
+	target_link_libraries(jetson-inference nvonnxparser)
+
+    if(HAS_OPENCV) 
+        message("-- Linking jetson-inference with OpenCV " ${OpenCV_VERSION})
+        target_link_libraries(jetson-inference opencv_core opencv_calib3d)
+    endif()
 endif()
 
 
